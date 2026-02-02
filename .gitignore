@@ -1,0 +1,43 @@
+# Python / OS
+__pycache__/
+*.pyc
+.DS_Store
+
+# Virtual envs
+.venv/
+env/
+venv/
+
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# Generated artifacts (don’t commit)
+UI_stuff/artifacts/
+UI_stuff/logs/
+UI_stuff/data/uploads/
+multiomics/artifacts/
+results/
+qc_reports/
+normalized_matrix/
+harmonized_matrix/
+embeddings/
+board_figures/
+
+# Big files
+*.parquet
+*.gz
+*.pdf
+
+# Raw GEO / platform dumps
+GSE*.txt
+GPL*.txt
+
+# Large raw inputs (don’t commit)
+CCR6_TMT*.csv
+MethylationEPIC*.csv
+
+# Huge annotation raw dump (GitHub limit)
+annotations/methylation_annotation_raw.csv
+
+# Backups
+*.save
