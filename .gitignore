@@ -41,3 +41,15 @@ annotations/methylation_annotation_raw.csv
 
 # Backups
 *.save
+# Streamlit runtime artifacts
+UI_stuff/artifacts/
+UI_stuff/data/uploads/
+
+# Generated ML outputs
+oof_*.csv
+fi_*.csv
+stability_*.csv
+*_feature_importance.csv
+meta_*.json
+*.parquet
+
