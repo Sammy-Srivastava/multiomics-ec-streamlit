@@ -1,9 +1,0 @@
-{
-  "weights": {
-    "methylation": 0.11956808213520047,
-    "transcriptomics": 0.5733532639694747,
-    "proteomics": 0.30707865389532485
-  },
-  "weight_mode": "auc",
-  "calibration": "none"
-}
