@@ -1,9 +1,11 @@
+#!/usr/bin/env python3
 from __future__ import annotations
 
 from pathlib import Path
+import argparse
+import re
 import numpy as np
 import pandas as pd
-import re
 
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
@@ -14,29 +16,11 @@ from sklearn.impute import SimpleImputer
 
 
 # ----------------------------
-# CONFIG
+# Defaults
 # ----------------------------
-PROJECT = Path("/Users/samyaksrivastava/Desktop/new science fair thing")
-
-RUN_DIR = Path("/Users/samyaksrivastava/Desktop/new science fair thing/UI_stuff/artifacts/harmonized/run_20260125_133200")
-T_PATH = RUN_DIR / "T_harmonized.parquet"
-
-Y_PATH = PROJECT / "labels_transcriptomics.csv"
-MAP_PATH = PROJECT / "transcriptomics_sample_mapping_SAMPLE_to_GSM.csv"
-
-OUT_OOF = PROJECT / "oof_transcriptomics.csv"
-OUT_FEATS = PROJECT / "transcriptomics_feature_importance.csv"
-
-# --- NEW: per-fold selected feature importances (stability-ready) ---
-OUT_FI_ALL_FOLDS = PROJECT / "fi_T_all_folds.csv"   # feature_id, fold, importance
-
-SEED = 42
-N_SPLITS = 5
-VAR_THRESHOLD = 1e-8
-
-# model hyperparams
-MODEL_C = 0.03
-K_BEST = 100
+DEFAULT_VAR_THRESHOLD = 1e-8
+DEFAULT_MODEL_C = 0.03
+DEFAULT_K_BEST = 100
 
 
 # ----------------------------
@@ -48,8 +32,10 @@ def dequote(s: str) -> str:
         s = s[1:-1]
     return s.strip()
 
+
 def normalize_id(s: str) -> str:
     return dequote(s).replace("\ufeff", "").strip()
+
 
 def split_suffix(col: str):
     # e.g. EC5_03.signal -> (EC5_03, .signal)
@@ -58,10 +44,6 @@ def split_suffix(col: str):
     if m:
         return m.group(1), m.group(2)  # base, suffix
     return col, ""
-
-def subject_from_sample_id(s: str) -> str:
-    # ART01_plus -> ART01
-    return str(s).split("_")[0]
 
 
 # ----------------------------
@@ -103,22 +85,24 @@ def load_sample_map(path: Path) -> dict[str, str]:
 
     return dict(zip(m[a], m[b]))
 
-def load_X(path: Path, rename_map: dict[str, str]) -> pd.DataFrame:
+
+def load_X(path: Path, rename_map: dict[str, str] | None) -> pd.DataFrame:
     """
     Reads features x samples parquet and returns samples x features.
+    If rename_map is provided, renames token columns to GSM-style IDs.
     Handles paired channels (.signal/.pvalue) by expanding into feature suffixes:
       geneA__signal, geneA__pvalue, ...
     """
     X_fxS = pd.read_parquet(path)
     X_fxS.columns = X_fxS.columns.astype(str).map(normalize_id)
 
-    # suffix-aware rename: token + .signal/.pvalue -> GSM + .signal/.pvalue
-    def renamer(c: str) -> str:
-        base, suf = split_suffix(c)
-        mapped = rename_map.get(base, base)
-        return f"{mapped}{suf}"
+    if rename_map:
+        def renamer(c: str) -> str:
+            base, suf = split_suffix(c)
+            mapped = rename_map.get(base, base)
+            return f"{mapped}{suf}"
 
-    X_fxS = X_fxS.rename(columns=renamer)
+        X_fxS = X_fxS.rename(columns=renamer)
 
     cols = X_fxS.columns.astype(str)
     has_signal = cols.str.endswith(".signal").any()
@@ -133,6 +117,7 @@ def load_X(path: Path, rename_map: dict[str, str]) -> pd.DataFrame:
 
         sc = [split_sc(c) for c in cols]
         mi = pd.MultiIndex.from_tuples(sc, names=["sample", "channel"])
+
         X_fxS2 = X_fxS.copy()
         X_fxS2.columns = mi
 
@@ -153,37 +138,73 @@ def load_X(path: Path, rename_map: dict[str, str]) -> pd.DataFrame:
     X.index = X.index.astype(str).map(normalize_id)
     return X
 
-def load_y(path: Path) -> pd.Series:
+
+def load_y(path: Path, pos_label: str = "EC", neg_label: str = "ART") -> pd.Series:
+    """
+    Accepts either:
+      - sample_id,label where label contains strings (e.g., EC/ART/HC)
+      - sample_id,y where y is 0/1
+    Drops samples not in {pos_label, neg_label} for string labels.
+    Ignores any extra columns (source/modality/etc).
+    """
     df = pd.read_csv(path)
-    if not {"sample_id", "label"}.issubset(df.columns):
-        raise ValueError(f"Labels file must have sample_id,label columns: {path}")
+    df.columns = [str(c).strip() for c in df.columns]
+    cols = {c.lower(): c for c in df.columns}
 
-    df["sample_id"] = df["sample_id"].astype(str).map(normalize_id)
-    lab = df["label"].astype(str).str.strip()
+    sid_col = cols.get("sample_id") or cols.get("sample") or cols.get("id")
+    if sid_col is None:
+        raise ValueError(f"Labels file must include sample_id. Found: {df.columns.tolist()}")
 
-    # keep EC + ART (drop HC)
-    keep = lab.isin(["EC", "ART"])
+    # prefer y if present; else label/target
+    y_col = cols.get("y") or cols.get("label") or cols.get("target")
+    if y_col is None:
+        raise ValueError(f"Labels file must include y or label. Found: {df.columns.tolist()}")
+
+    df[sid_col] = df[sid_col].astype(str).map(normalize_id)
+
+    y_raw = df[y_col]
+
+    # numeric y?
+    y_num = pd.to_numeric(y_raw, errors="coerce")
+    if y_num.notna().mean() > 0.95:
+        y = y_num.dropna().astype(int)
+        bad = sorted(set(y.unique()) - {0, 1})
+        if bad:
+            raise ValueError(f"Numeric y must be binary 0/1. Found extra values: {bad}")
+        out = pd.Series(y.values, index=df.loc[y.index, sid_col].values, dtype=int)
+        out.index = out.index.astype(str).map(normalize_id)
+        return out
+
+    # string labels
+    lab = y_raw.astype(str).str.strip()
+    keep = lab.isin([pos_label, neg_label])
     df = df.loc[keep].copy()
     if df.empty:
-        raise ValueError("No rows with labels in {EC, ART}.")
+        raise ValueError(f"No rows with labels in {{{pos_label}, {neg_label}}}.")
 
-    # define binary task EC vs ART
-    y = df.set_index("sample_id")["label"].map({"ART": 0, "EC": 1}).astype(int)
-    y.index = y.index.astype(str).map(normalize_id)
-    return y
+    mapping = {neg_label: 0, pos_label: 1}
+    out = df.set_index(sid_col)[y_col].astype(str).str.strip().map(mapping).astype(int)
+    out.index = out.index.astype(str).map(normalize_id)
+    return out
+
 
 def align_Xy(X: pd.DataFrame, y: pd.Series) -> tuple[pd.DataFrame, pd.Series]:
     common = X.index.intersection(y.index)
     if len(common) == 0:
         raise ValueError("No overlapping sample IDs between X and y.")
-    X2 = X.loc[common].copy()
-    y2 = y.loc[common].copy()
-    return X2, y2
+    return X.loc[common].copy(), y.loc[common].copy()
 
 
 # ----------------------------
-# Modeling
+# Modeling helpers
 # ----------------------------
+def _safe_n_splits(y_np: np.ndarray, requested: int) -> int:
+    n_pos = int((y_np == 1).sum())
+    n_neg = int((y_np == 0).sum())
+    max_possible = max(2, min(n_pos, n_neg))
+    return int(min(int(requested), max_possible))
+
+
 def pick_threshold_max_f1_no_collapse(y_true: np.ndarray, proba: np.ndarray) -> float:
     thresholds = np.linspace(0.05, 0.95, 181)
     best_t, best = 0.5, -1.0
@@ -203,6 +224,7 @@ def _fit_transform_with_meta(
     X_te: np.ndarray,
     feat_names_full: np.ndarray,
     k_best: int,
+    var_threshold: float,
 ):
     """
     Fold-safe preprocessing + returns selected feature names aligned to final columns.
@@ -211,7 +233,7 @@ def _fit_transform_with_meta(
       3) scale
       4) SelectKBest
     """
-    vt = VarianceThreshold(threshold=VAR_THRESHOLD)
+    vt = VarianceThreshold(threshold=float(var_threshold))
     X_tr1 = vt.fit_transform(X_tr)
     X_te1 = vt.transform(X_te)
     feats1 = feat_names_full[vt.get_support()]
@@ -227,7 +249,7 @@ def _fit_transform_with_meta(
     X_tr2 = scaler.fit_transform(X_tr_imp)
     X_te2 = scaler.transform(X_te_imp)
 
-    k = int(min(k_best, X_tr2.shape[1]))
+    k = int(min(int(k_best), X_tr2.shape[1]))
     if k < 1:
         raise ValueError("No features survived filtering in this fold.")
 
@@ -239,19 +261,30 @@ def _fit_transform_with_meta(
     return X_tr3, X_te3, feats2
 
 
-def logistic_cv_oof_tinyn_v2(X: pd.DataFrame, y: pd.Series, k_best: int, C: float):
+def logistic_cv_oof(
+    X: pd.DataFrame,
+    y: pd.Series,
+    *,
+    n_splits: int,
+    seed: int,
+    k_best: int,
+    model_c: float,
+    var_threshold: float,
+    out_fi_all_folds: Path,
+):
     X_np = X.to_numpy(dtype=float)
     y_np = y.to_numpy(dtype=int)
     feat_names_full = X.columns.to_numpy(dtype=str)
 
-    cv = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=SEED)
+    n_splits_safe = _safe_n_splits(y_np, n_splits)
+    if n_splits_safe != int(n_splits):
+        print(f"[T] Adjusted n_splits {n_splits} -> {n_splits_safe} due to class counts.")
+    cv = StratifiedKFold(n_splits=n_splits_safe, shuffle=True, random_state=int(seed))
 
     oof_proba = pd.Series(index=X.index, dtype=float)
     oof_pred = pd.Series(index=X.index, dtype=int)
 
     aucs, baccs, cms = [], [], []
-
-    # --- NEW: collect per-fold selected-feature importances for stability ---
     fi_rows: list[dict] = []
 
     for fold, (tr, te) in enumerate(cv.split(X_np, y_np), start=1):
@@ -259,12 +292,17 @@ def logistic_cv_oof_tinyn_v2(X: pd.DataFrame, y: pd.Series, k_best: int, C: floa
         X_te, y_te = X_np[te], y_np[te]
 
         X_tr3, X_te3, fold_feats = _fit_transform_with_meta(
-            X_tr, y_tr, X_te, feat_names_full=feat_names_full, k_best=k_best
+            X_tr,
+            y_tr,
+            X_te,
+            feat_names_full=feat_names_full,
+            k_best=int(k_best),
+            var_threshold=float(var_threshold),
         )
 
         clf = LogisticRegression(
             solver="liblinear",
-            C=float(C),
+            C=float(model_c),
             class_weight="balanced",
             max_iter=5000,
         )
@@ -274,7 +312,7 @@ def logistic_cv_oof_tinyn_v2(X: pd.DataFrame, y: pd.Series, k_best: int, C: floa
         p_tr = clf.predict_proba(X_tr3)[:, 1]
         thr = pick_threshold_max_f1_no_collapse(y_tr, p_tr)
 
-        # --- NEW: per-fold feature importances = abs(coef) mapped to selected features ---
+        # per-fold feature importances = abs(coef)
         coefs = clf.coef_.ravel()
         importances = np.abs(coefs)
         for fid, imp in zip(fold_feats, importances):
@@ -286,41 +324,40 @@ def logistic_cv_oof_tinyn_v2(X: pd.DataFrame, y: pd.Series, k_best: int, C: floa
         oof_proba.iloc[te] = p_te
         oof_pred.iloc[te] = pred_te
 
-        aucs.append(roc_auc_score(y_te, p_te))
-        baccs.append(balanced_accuracy_score(y_te, pred_te))
+        aucs.append(float(roc_auc_score(y_te, p_te)) if len(np.unique(y_te)) >= 2 else float("nan"))
+        baccs.append(float(balanced_accuracy_score(y_te, pred_te)))
         cms.append(confusion_matrix(y_te, pred_te, labels=[0, 1]))
 
-        print(f"Fold {fold}: thr={thr:.3f} | AUC={aucs[-1]:.3f} | BalAcc={baccs[-1]:.3f}")
+        print(f"[T] Fold {fold}: thr={thr:.3f} | AUC={aucs[-1]:.3f} | BalAcc={baccs[-1]:.3f}")
 
-    mean_auc, std_auc = float(np.mean(aucs)), float(np.std(aucs))
+    mean_auc, std_auc = float(np.nanmean(aucs)), float(np.nanstd(aucs))
     mean_bacc, std_bacc = float(np.mean(baccs)), float(np.std(baccs))
     cm_sum = np.sum(cms, axis=0)
 
-    print("\nCV summary")
+    print("\n[T] CV summary")
     print(f"AUC mean±std: {mean_auc:.3f} ± {std_auc:.3f}")
     print(f"BalAcc mean±std: {mean_bacc:.3f} ± {std_bacc:.3f}")
     print("Confusion matrix (rows=true [0,1], cols=pred [0,1]):")
     print(cm_sum)
 
-    # --- NEW: save fi_all_folds here so you don't lose it ---
-    fi_df = pd.DataFrame(fi_rows)
-    fi_df.to_csv(OUT_FI_ALL_FOLDS, index=False)
-    print(f"Saved (per-fold selected feature importances): {OUT_FI_ALL_FOLDS}")
+    out_fi_all_folds.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(fi_rows).to_csv(out_fi_all_folds, index=False)
+    print(f"Saved (per-fold selected feature importances): {out_fi_all_folds}")
 
-    summary = {
-        "auc_mean": mean_auc,
-        "auc_std": std_auc,
-        "bacc_mean": mean_bacc,
-        "bacc_std": std_bacc,
-        "cm_sum": cm_sum,
-        "n": int(X.shape[0]),
-        "p": int(X.shape[1]),
-    }
-    return oof_proba, oof_pred, summary
+    return oof_proba, oof_pred
 
 
-def fit_final_logistic_and_export_features(X: pd.DataFrame, y: pd.Series, k_best: int, C: float) -> pd.DataFrame:
-    vt = VarianceThreshold(threshold=VAR_THRESHOLD)
+def fit_final_and_export_features(
+    X: pd.DataFrame,
+    y: pd.Series,
+    *,
+    k_best: int,
+    model_c: float,
+    var_threshold: float,
+    pos_label: str,
+    neg_label: str,
+) -> pd.DataFrame:
+    vt = VarianceThreshold(threshold=float(var_threshold))
     X1 = vt.fit_transform(X.to_numpy(dtype=float))
 
     X1 = np.where(np.isfinite(X1), X1, np.nan)
@@ -330,30 +367,28 @@ def fit_final_logistic_and_export_features(X: pd.DataFrame, y: pd.Series, k_best
     scaler = StandardScaler(with_mean=True, with_std=True)
     X3 = scaler.fit_transform(X2)
 
-    k = int(min(k_best, X3.shape[1]))
+    k = int(min(int(k_best), X3.shape[1]))
     skb = SelectKBest(score_func=f_classif, k=k)
     X4 = skb.fit_transform(X3, y.to_numpy(dtype=int))
 
     clf = LogisticRegression(
         solver="liblinear",
-        C=float(C),
+        C=float(model_c),
         class_weight="balanced",
         max_iter=5000,
     )
     clf.fit(X4, y.to_numpy(dtype=int))
 
-    # recover feature names
     feats_vt = X.columns[vt.get_support()]
     feats = feats_vt[skb.get_support()]
     coefs = clf.coef_.ravel()
 
-    # NOTE: direction labels fixed for EC vs ART
     feat_df = pd.DataFrame(
         {
             "feature": feats,
             "coef": coefs,
             "abs_coef": np.abs(coefs),
-            "direction": np.where(coefs > 0, "EC", "ART"),
+            "direction": np.where(coefs > 0, pos_label, neg_label),
         }
     ).sort_values("abs_coef", ascending=False)
 
@@ -364,21 +399,79 @@ def fit_final_logistic_and_export_features(X: pd.DataFrame, y: pd.Series, k_best
 # MAIN
 # ----------------------------
 def main():
-    # minimal checks
+    ap = argparse.ArgumentParser(
+        description="Train transcriptomics classifier with OOF CV; export feature importance + stability table."
+    )
+
+    ap.add_argument("--matrix", required=True, help="Path to T_harmonized.parquet (features x samples)")
+    ap.add_argument("--out_dir", required=True, help="Output directory to write OOF + feature files")
+    ap.add_argument("--labels", required=True, help="Labels CSV with sample_id,label OR sample_id,y")
+
+    # optional sample map
+    ap.add_argument(
+        "--sample_map",
+        required=False,
+        default=None,
+        help="Optional mapping CSV (token->GSM). If omitted, uses matrix columns as sample IDs.",
+    )
+
+    ap.add_argument("--n_splits", type=int, default=5)
+    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--k_best", type=int, default=DEFAULT_K_BEST)
+    ap.add_argument("--model_c", type=float, default=DEFAULT_MODEL_C)
+    ap.add_argument("--var_threshold", type=float, default=DEFAULT_VAR_THRESHOLD)
+
+    ap.add_argument("--pos_label", type=str, default="EC")
+    ap.add_argument("--neg_label", type=str, default="ART")
+
+    args = ap.parse_args()
+
+    T_PATH = Path(args.matrix)
+    OUT_DIR = Path(args.out_dir)
+    Y_PATH = Path(args.labels)
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    OUT_OOF = OUT_DIR / "oof_transcriptomics.csv"
+    OUT_FEATS = OUT_DIR / "transcriptomics_feature_importance.csv"
+    OUT_FI_ALL_FOLDS = OUT_DIR / "fi_T_all_folds.csv"
+
     if not T_PATH.exists():
         raise FileNotFoundError(f"Transcriptomics matrix not found: {T_PATH}")
     if not Y_PATH.exists():
         raise FileNotFoundError(f"Labels not found: {Y_PATH}")
-    if not MAP_PATH.exists():
-        raise FileNotFoundError(f"Mapping not found: {MAP_PATH}")
 
-    rename_map = load_sample_map(MAP_PATH)
+    rename_map = None
+    if args.sample_map:
+        map_path = Path(args.sample_map)
+        if not map_path.exists():
+            raise FileNotFoundError(f"Sample map not found: {map_path}")
+        rename_map = load_sample_map(map_path)
+        print(f"[T] Using sample_map: {map_path}")
+    else:
+        print("[T] No sample_map provided (using matrix columns as sample IDs).")
+
+    print(f"[T] matrix: {T_PATH}")
+    print(f"[T] labels: {Y_PATH}")
+    print(f"[T] out_dir: {OUT_DIR}")
+    print(f"[T] pos_label={args.pos_label}, neg_label={args.neg_label}")
 
     X = load_X(T_PATH, rename_map=rename_map)
-    y = load_y(Y_PATH)
-    X, y = align_Xy(X, y)
+    y = load_y(Y_PATH, pos_label=args.pos_label, neg_label=args.neg_label)
 
-    oof_proba, oof_pred, _summary = logistic_cv_oof_tinyn_v2(X, y, k_best=K_BEST, C=MODEL_C)
+    X, y = align_Xy(X, y)
+    print(f"[T] Aligned: X={X.shape} (samples x features) | y={y.value_counts().to_dict()}")
+
+    oof_proba, oof_pred = logistic_cv_oof(
+        X,
+        y,
+        n_splits=args.n_splits,
+        seed=args.seed,
+        k_best=args.k_best,
+        model_c=args.model_c,
+        var_threshold=args.var_threshold,
+        out_fi_all_folds=OUT_FI_ALL_FOLDS,
+    )
 
     out_df = pd.DataFrame(
         {
@@ -389,9 +482,17 @@ def main():
         }
     )
     out_df.to_csv(OUT_OOF, index=False)
-    print(f"\nSaved OOF predictions: {OUT_OOF}")
+    print(f"Saved OOF predictions: {OUT_OOF}")
 
-    feat_df = fit_final_logistic_and_export_features(X, y, k_best=K_BEST, C=MODEL_C)
+    feat_df = fit_final_and_export_features(
+        X,
+        y,
+        k_best=args.k_best,
+        model_c=args.model_c,
+        var_threshold=args.var_threshold,
+        pos_label=args.pos_label,
+        neg_label=args.neg_label,
+    )
     feat_df.to_csv(OUT_FEATS, index=False)
     print(f"Saved feature importance: {OUT_FEATS}")
 

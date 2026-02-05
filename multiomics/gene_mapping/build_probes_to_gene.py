@@ -11,7 +11,7 @@ import numpy as np
 PROJECT = Path("/Users/samyaksrivastava/Desktop/new science fair thing")
 TRANS_FI = PROJECT / "transcriptomics_feature_importance.csv"
 GPL = PROJECT / "GPL10558_HumanHT-12_V4_0_R1_15002873_B.txt"
-OUT = PROJECT / "probe_to_gene_T.csv"
+OUT = PROJECT / "resources" / "mappings" / "probe_to_gene_T.csv"
 
 def open_text_maybe_gz(path: Path) -> io.TextIOBase:
     if str(path).endswith(".gz"):

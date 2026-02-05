@@ -33,7 +33,7 @@ TRANS_FI = PROJECT / "transcriptomics_feature_importance.csv"
 PROT_FI  = PROJECT / "proteomics_feature_importance.csv"
 METH_FI  = PROJECT / "methylation_feature_importance.csv"
 
-PROBE2GENE_T  = PROJECT / "probe_to_gene_T.csv"   # optional, for ILMN_ probes
+PROBE2GENE_T  = PROJECT / "resources" / "mappings" / "probe_to_gene_T.csv"  # optional, for ILMN_ probes
 GPL10558      = PROJECT / "GPL10558_HumanHT-12_V4_0_R1_15002873_B.txt"  # optional best-effort
 EPIC_MANIFEST = PROJECT / "MethylationEPIC_v-1-0_B4.csv"               # required if methylation FI is cg probes
 UNIPROT2GENE  = PROJECT / "uniprot_to_gene.csv"                        # optional but recommended

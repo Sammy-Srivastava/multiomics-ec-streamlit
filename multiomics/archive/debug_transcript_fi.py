@@ -3,7 +3,7 @@ import pandas as pd
 
 PROJECT = Path("/Users/samyaksrivastava/Desktop/new science fair thing")
 TRANS_FI = PROJECT / "transcriptomics_feature_importance.csv"
-P2G = PROJECT / "probe_to_gene_T.csv"
+P2G = PROJECT / "resources" / "mappings" / "probe_to_gene_T.csv"
 
 fi = pd.read_csv(TRANS_FI)
 p2g = pd.read_csv(P2G)
