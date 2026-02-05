@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple, List
+import sys
 
 import os
 import numpy as np
@@ -795,7 +796,7 @@ with tab_train:
                 continue
 
             cmd = [
-                "python3",
+                sys.executable,
                 str(sp),
             ]
 
