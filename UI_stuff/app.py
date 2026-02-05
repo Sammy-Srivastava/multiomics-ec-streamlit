@@ -1,4 +1,3 @@
-# UI_stuff/app.py
 from __future__ import annotations
 
 import json
@@ -11,7 +10,6 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple, List
-import sys
 
 import os
 import numpy as np
@@ -19,9 +17,8 @@ import pandas as pd
 import streamlit as st
 
 
-# =============================================================================
-# Path setup
-# =============================================================================
+# ---Path setup---
+
 project_root = Path(__file__).resolve().parents[1]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
@@ -51,17 +48,13 @@ LABEL_COL_ALIASES = {
 
 IS_CLOUD = bool(st.secrets.get('STREAMLIT_CLOUD', False)) or bool(os.environ.get('STREAMLIT_SERVER_RUNNING', ''))
 
-# =============================================================================
-# Page config
-# =============================================================================
+# ---Page config---
 st.set_page_config(page_title="Omics Harmonizer", layout="wide")
 st.title("Omics Harmonizer Dashboard")
 st.caption("Upload → Harmonize → Train unimodal models → Combine → Board exports")
 
 
-# =============================================================================
-# Utilities
-# =============================================================================
+# ---Utilities---
 def safe_filename(name: str) -> str:
     name = name.replace("\\", "_").replace("/", "_")
     return "".join(c for c in name if c.isalnum() or c in "._-")
@@ -156,8 +149,7 @@ def read_matrix_head_cached(path_str: str, nrows: int = 25) -> pd.DataFrame:
         if "Duplicate column names" not in msg and "duplicate" not in msg.lower():
             raise
 
-        # ---- Fallback: manual header -> unique -> read with header=None ----
-        # Read just the first line (header) ourselves
+        #fallback: manual header -> unique -> read with header=None
 
         if compression == "gzip":
             import gzip
@@ -203,7 +195,7 @@ def canonicalize_sample_ids(omic_key: str, cols: pd.Index) -> pd.Index:
 
 def make_unique_columns(cols: List[str]) -> List[str]:
     """
-    Ensure column names are unique by suffixing duplicates: col, col__2, col__3, ...
+    ensuring column names are unique by suffixing duplicates
     """
     seen: Dict[str, int] = {}
     out: List[str] = []
@@ -220,8 +212,8 @@ def make_unique_columns(cols: List[str]) -> List[str]:
 
 def collapse_duplicate_columns_numeric(df: pd.DataFrame, how: str = "mean") -> pd.DataFrame:
     """
-    If df has duplicate column names, combine duplicates across columns using mean/median (numeric only).
-    Non-numeric values -> NaN.
+    If duplicate column names combine duplicates across columns using mean/median.
+    non-numeric values become nan.
     """
     if not df.columns.duplicated().any():
         return df
@@ -241,9 +233,7 @@ def collapse_duplicate_columns_numeric(df: pd.DataFrame, how: str = "mean") -> p
     return pd.DataFrame(grouped, index=df.index)
 
     
-# =============================================================================
-# Labels: upload + validate
-# =============================================================================
+# ---Labels: upload + validate---
 def _pick_col(df: pd.DataFrame, alias_set: set) -> Optional[str]:
     cols = {str(c).strip().lower(): c for c in df.columns}
     for a in alias_set:
@@ -269,7 +259,7 @@ def validate_labels_df(df: pd.DataFrame) -> Tuple[bool, str, Optional[pd.DataFra
     sid_col = _pick_col(df, LABEL_COL_ALIASES["sample_id"])
     lab_col = _pick_col(df, LABEL_COL_ALIASES["label"])
     if sid_col is None or lab_col is None:
-        return False, f"Labels must include sample_id + label (found {df.columns.tolist()})", None
+        return False, f"Labels must include sample_id and label (found {df.columns.tolist()})", None
 
     out = df[[sid_col, lab_col]].copy()
     out.columns = ["sample_id", "label"]
@@ -286,10 +276,7 @@ def validate_labels_df(df: pd.DataFrame) -> Tuple[bool, str, Optional[pd.DataFra
 def labels_template_df() -> pd.DataFrame:
     return pd.DataFrame({"sample_id": ["GSM0000001", "GSM0000002", "GSM0000003"], "label": ["EC", "ART", "EC"]})
 
-
-# =============================================================================
-# Probe→gene mapping (Option B: default or upload)
-# =============================================================================
+# ---Probe -> gene mapping---
 @st.cache_data(show_spinner=False)
 def load_default_probe2gene() -> pd.DataFrame:
     if not DEFAULT_PROBE2GENE_PATH.exists():
@@ -364,10 +351,7 @@ def aggregate_methylation_probes_to_genes(
     }
     return G_gxS, report
 
-
-# =============================================================================
-# Sidebar
-# =============================================================================
+# ---Sidebar---
 with st.sidebar:
     st.header("Control Panel")
     if st.button("Clear cache + rerun"):
@@ -401,18 +385,13 @@ with st.sidebar:
             if lp.exists():
                 st.code("\n".join(lp.read_text(encoding="utf-8").splitlines()[-120:]))
 
-
-# =============================================================================
-# Tabs
-# =============================================================================
+# ---Tabs---
 tab_upload, tab_select, tab_preview, tab_harmonize, tab_train, tab_combine, tab_board = st.tabs(
     ["1) Upload", "2) Select", "3) Preview", "4) Harmonize", "5) Train", "6) Combine", "7) Board exports"]
 )
 
 
-# =============================================================================
-# 1) Upload
-# =============================================================================
+# ---1. Upload---
 with tab_upload:
     st.header("1) Upload files")
     uploaded_files = st.file_uploader(
@@ -456,9 +435,7 @@ with tab_upload:
         st.write(relpaths)
 
 
-# =============================================================================
-# 2) Select
-# =============================================================================
+# ---2. Select---
 with tab_select:
     st.header("2) Select inputs")
     relpaths = list_uploaded_relpaths_cached(str(upload_dir))
@@ -473,12 +450,6 @@ with tab_select:
         rna_file = st.selectbox("Transcriptomics (T)", options=["(none)"] + relpaths, index=0, key="sb_t")
     with c3:
         prot_file = st.selectbox("Proteomics (P)", options=["(none)"] + relpaths, index=0, key="sb_p")
-
-    c4, c5 = st.columns(2)
-    with c4:
-        metab_file = st.selectbox("Metabolomics (Mb)", options=["(none)"] + relpaths, index=0, key="sb_mb")
-    with c5:
-        gen_file = st.selectbox("Genomics (G)", options=["(none)"] + relpaths, index=0, key="sb_g")
 
     st.subheader("Harmonization settings")
     sample_strategy = st.selectbox("Sample handling", ["union", "intersection"], index=0, key="sb_strategy")
@@ -505,9 +476,7 @@ with tab_select:
         st.warning("No labels uploaded yet (training will require labels).")
 
 
-# =============================================================================
-# 3) Preview
-# =============================================================================
+# ---3. Preview---
 with tab_preview:
     st.header("3) Preview (head only)")
     st.caption("This does not read full files. It’s just to sanity-check formatting.")
@@ -519,10 +488,6 @@ with tab_preview:
         in_paths["T"] = upload_dir / st.session_state["sb_t"]
     if st.session_state.get("sb_p") and st.session_state["sb_p"] != "(none)":
         in_paths["P"] = upload_dir / st.session_state["sb_p"]
-    if st.session_state.get("sb_mb") and st.session_state["sb_mb"] != "(none)":
-        in_paths["Mb"] = upload_dir / st.session_state["sb_mb"]
-    if st.session_state.get("sb_g") and st.session_state["sb_g"] != "(none)":
-        in_paths["G"] = upload_dir / st.session_state["sb_g"]
 
     preview_rows = int(st.session_state.get("ni_preview_rows", 25))
 
@@ -550,9 +515,7 @@ with tab_preview:
                     st.error(f"Preview failed: {e}")
 
 
-# =============================================================================
-# 4) Harmonize (+ Option B methylation gene aggregation)
-# =============================================================================
+# ---4. Harmonize alongside methylation gene aggregation---
 with tab_harmonize:
     st.header("4) Harmonize")
     st.caption("Writes a harmonized matrix per modality into a new run folder.")
@@ -564,10 +527,6 @@ with tab_harmonize:
         in_paths["T"] = upload_dir / st.session_state["sb_t"]
     if st.session_state.get("sb_p") and st.session_state["sb_p"] != "(none)":
         in_paths["P"] = upload_dir / st.session_state["sb_p"]
-    if st.session_state.get("sb_mb") and st.session_state["sb_mb"] != "(none)":
-        in_paths["Mb"] = upload_dir / st.session_state["sb_mb"]
-    if st.session_state.get("sb_g") and st.session_state["sb_g"] != "(none)":
-        in_paths["G"] = upload_dir / st.session_state["sb_g"]
 
     sample_strategy = st.session_state.get("sb_strategy", "union")
     out_format = st.session_state.get("sb_outfmt", "parquet")
@@ -576,7 +535,7 @@ with tab_harmonize:
         st.warning("Select at least one input in the Select tab.")
         st.stop()
 
-    st.subheader("Optional (M only): aggregate probes → genes (Option B)")
+    st.subheader("(M only) Aggregate probes to genes ")
     st.write("Uses the default mapping unless you upload a custom probe-to-gene file.")
 
     do_m_gene = st.checkbox("Create gene-level methylation matrix after harmonization", value=False)
@@ -612,7 +571,7 @@ with tab_harmonize:
 
         try:
             with st.spinner("Running multiharmonize..."):
-                import harmonizing_stuff.data_harmonization.multiharmonize as mh  # local import
+                import harmonizing_stuff.data_harmonization.multiharmonize as mh  #a local import
 
                 res = mh.multiharmonize(
                     in_paths=in_paths,
@@ -650,7 +609,7 @@ with tab_harmonize:
             st.write("Run:", run_id)
             st.write({k: Path(v).name for k, v in outputs.items()})
 
-            # ---- Option B: M probes -> genes ----
+            # -probes to gene-
             if do_m_gene and "M" in outputs:
                 m_path = Path(outputs["M"])
                 if not m_path.exists():
@@ -663,15 +622,15 @@ with tab_harmonize:
                     # mapping selection
                     if uploaded_map is not None:
                         mapping = load_uploaded_probe2gene(uploaded_map)
-                        # Save a copy into the run folder for reproducibility (not the repo)
+                        #saving a copy into the run folder for reproducibility
                         saved_map_path = run_dir / "custom_probe_to_gene.csv"
                         mapping.to_csv(saved_map_path, index=False)
-                        st.info(f"Using CUSTOM mapping (saved to {saved_map_path.name}).")
+                        st.info(f"Using custom mapping (saved to {saved_map_path.name}).")
                     else:
                         mapping = load_default_probe2gene()
-                        st.info("Using DEFAULT mapping (annotations/probe_to_gene.csv).")
+                        st.info("Using default mapping (annotations/probe_to_gene.csv).")
 
-                    with st.spinner("Aggregating probes → genes..."):
+                    with st.spinner("Aggregating probes to genes..."):
                         G_gxS, rep = aggregate_methylation_probes_to_genes(
                             M_fxS=M_fxS,
                             mapping=mapping,
@@ -700,9 +659,8 @@ with tab_harmonize:
             st.exception(e)
 
 
-# =============================================================================
-# Helpers for later tabs
-# =============================================================================
+# ---Helpers---
+
 def get_run_outputs(run_dir: Path) -> Dict[str, Path]:
     rp = run_dir / "run_report.json"
     if not rp.exists():
@@ -719,18 +677,13 @@ def find_training_script(name: str) -> Optional[Path]:
             return p
     return None
 
-
 def script_supports_flag(script_path: Path, flag: str) -> bool:
     try:
         return flag in script_path.read_text(encoding="utf-8", errors="ignore")
     except Exception:
         return False
     
-
-
-# =============================================================================
-# 5) Train
-# =============================================================================
+# ---5. Train---
 with tab_train:
     st.header("5) Train unimodal models (OOF)")
 
@@ -743,7 +696,7 @@ with tab_train:
     run_dir = HARMONIZED_ROOT / pick
     outs = get_run_outputs(run_dir)
 
-    # Prefer gene-level methylation if it exists (Option B output)
+    # Prefer gene-level methylation if it exists
     gene_candidates = sorted(run_dir.glob("M_gene_*.parquet")) + sorted(run_dir.glob("M_gene_*.csv"))
     if gene_candidates:
         st.info(f"Detected gene-level methylation matrix: {gene_candidates[0].name} (will use this for M)")
@@ -796,7 +749,7 @@ with tab_train:
                 continue
 
             cmd = [
-                sys.executable,
+                "python3",
                 str(sp),
             ]
 
@@ -805,15 +758,14 @@ with tab_train:
             if candidate.exists():
                 t_map_path = candidate
             
-            # Matrix flag (most of your scripts now support this)
+            # Matrix flag
             if _supports_any(sp, ["--matrix"]):
                 cmd += ["--matrix", str(mat)]
 
-            # Out dir flag
             if _supports_any(sp, ["--out_dir"]):
                 cmd += ["--out_dir", str(oof_dir)]
 
-            # Labels flag (your T script requires it; others may ignore)
+            # Labels flag 
             if _supports_any(sp, ["--labels"]):
                 cmd += ["--labels", str(Path(labels_path_str))]
 
@@ -821,8 +773,7 @@ with tab_train:
             if k == "T" and _supports_any(sp, ["--sample_map"]):
                 cmd += ["--sample_map", str(t_map_path)]
 
-            # Optional CV + seed flags
-            # Optional CV + seed flags
+            #CV + seed flags
             if _supports_any(sp, ["--n_splits_max"]):
                 cmd += ["--n_splits_max", str(int(n_splits))]
             elif _supports_any(sp, ["--n_splits"]):
@@ -830,7 +781,6 @@ with tab_train:
             if _supports_any(sp, ["--seed"]):
                 cmd += ["--seed", str(int(seed))]
 
-            # Optional EC/ART flags (only if the script uses them)
             if _supports_any(sp, ["--pos_label"]):
                 cmd += ["--pos_label", pos_label]
             if _supports_any(sp, ["--neg_label"]):
@@ -861,9 +811,7 @@ with tab_train:
         st.warning('Training is disabled on Streamlit Cloud')
         st.stop()
 
-# =============================================================================
-# 6) Combine
-# =============================================================================
+# ---6. Combine---
 with tab_combine:
     st.header("6) Combine results (weights)")
 
@@ -880,7 +828,7 @@ with tab_combine:
     combine_dir.mkdir(parents=True, exist_ok=True)
     fig_dir.mkdir(parents=True, exist_ok=True)
 
-    # ---- helpers must be defined BEFORE use ----
+    # helpers
     def pick_first_existing(paths: List[Path]) -> Optional[Path]:
         for p in paths:
             if p.exists():
@@ -933,7 +881,7 @@ with tab_combine:
         st.write("Found in oof/:", [p.name for p in sorted(oof_dir.glob('*.csv'))])
         st.stop()
 
-    from sklearn.metrics import roc_auc_score  # noqa: E402
+    from sklearn.metrics import roc_auc_score  #noqa: E402
 
     def read_oof(path: Path) -> pd.DataFrame:
         df = pd.read_csv(path)
@@ -993,9 +941,7 @@ with tab_combine:
         plt.close(fig)
         st.image(str(fig_path), caption="OOF AUC by modality")
         
-# =============================================================================
-# 7) Board exports (simple zip)
-# =============================================================================
+# ---7. Board exports (simple zip)---
 with tab_board:
     st.header("7) Board exports (ZIP)")
 
@@ -1022,7 +968,7 @@ with tab_board:
         if p.exists():
             include.append(p)
 
-    # add all pngs/csvs that exist in common folders
+    # adding all pngs/csvs that exist in common folders
     for folder in ["figures", "oof", "combine"]:
         fdir = run_dir / folder
         if fdir.exists():
