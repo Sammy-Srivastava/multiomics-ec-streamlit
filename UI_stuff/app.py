@@ -753,7 +753,7 @@ with tab_train:
                 continue
 
             cmd = [
-                "python3",
+                sys.executable,
                 str(sp),
             ]
 
