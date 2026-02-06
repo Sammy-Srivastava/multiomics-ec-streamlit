@@ -14,7 +14,7 @@ class ProteomicNormalizer:
         self,
         prefer_lfq: bool = True,
         min_nonzero_fraction: float = 0.2,
-        feature_level: str = "gene",  # "gene" or "protein"
+        feature_level: str = "gene", 
     ):
         self.prefer_lfq = bool(prefer_lfq)
         self.min_nonzero_fraction = float(min_nonzero_fraction)
@@ -27,7 +27,7 @@ class ProteomicNormalizer:
         self._X_raw: Optional[pd.DataFrame] = None
         self._X_norm: Optional[pd.DataFrame] = None
 
-    #HELPERS
+    #---helpers---
     
     @staticmethod
     def _is_parquet_file(p: Path) -> bool:
@@ -52,7 +52,6 @@ class ProteomicNormalizer:
         last_err = None
         for enc in ("utf-8", "latin1", "cp1252"):
             try:
-                # nrows=0 reads header only
                 header_df = pd.read_csv(
                     p,
                     sep=sep,
@@ -71,7 +70,7 @@ class ProteomicNormalizer:
     #column selection logic
     @staticmethod
     def _pick_id_candidates(cols: List[str]) -> Tuple[str, Optional[str]]:
-        #Choose best ID columns based on MaxQuant conventions.
+        #Choosing best ID columns based on MaxQuant conventions.
         protein_col = None
         for c in ("Majority protein IDs", "Protein IDs"):
             if c in cols:
@@ -84,8 +83,8 @@ class ProteomicNormalizer:
         return protein_col, gene_col
 
     def _detect_quant_columns_from_header(self, cols: List[str]) -> Tuple[List[str], str, callable]:
-        #Detect quant columns without reading the full file.
-        # Keep original strings to match exact columns in usecols
+        '''Detect quant columns without reading the full file.
+        Keeping original strings to match exact columns in usecols'''
         lfq_cols = [c for c in cols if c.startswith("LFQ intensity ")]
         intensity_cols = [c for c in cols if c.startswith("Intensity ")]
         peptides_cols = [c for c in cols if c.startswith("Peptides ")]
@@ -111,7 +110,7 @@ class ProteomicNormalizer:
     # Robust read of selected columns (usecols)
     @staticmethod
     def _read_usecols(p: Path, sep: str, compression, usecols: List[str]) -> pd.DataFrame:
-        # Fast path
+        #fast path
         try:
             df = pd.read_csv(
                 p,
@@ -158,7 +157,7 @@ class ProteomicNormalizer:
         if name.endswith(bad_ext):
             raise ValueError("Selected a raw mass-spec file. Use a processed quant table (MaxQuant proteinGroups.txt or a CSV/TSV/Parquet quant table).")
 
-        # Parquet path: read once; parquet is already columnar and fast.
+        # read once, parquet is already columnar and fast
         if name.endswith(".parquet") or self._is_parquet_file(p):
             df = pd.read_parquet(p)
             if df is None or df.shape[0] == 0 or df.shape[1] == 0:
@@ -178,7 +177,7 @@ class ProteomicNormalizer:
             work = df[[c for c in [protein_col, gene_col] if c is not None] + quant_cols].copy()
             return self._fit_from_df(work, protein_col, gene_col, quant_cols, quant_type, clean)
 
-        # Text path: header then select columns then read only those columns
+        # header then select columns then read only those columns
         sep = self._guess_sep(name)
         compression = self._guess_compression(name)
 
@@ -214,17 +213,17 @@ class ProteomicNormalizer:
         X.columns = [clean(c) for c in X.columns]
         X.columns = X.columns.astype(str).str.strip()
 
-        # Dedup sample columns if present
+        # Deduplicate sample columns if present
         if pd.Index(X.columns).duplicated().any():
             X = X.loc[:, ~pd.Index(X.columns).duplicated()]
 
-        # Numeric coercion once
+        # doing numeric coercion once
         X = X.apply(pd.to_numeric, errors="coerce")
         X = X.replace(0, np.nan)
 
         used_feature = "protein"
 
-        # Gene aggregation if requested and gene column looks usable
+        # Gene aggregation if requested
         if self.feature_level == "gene" and gene_col is not None and gene_col in df.columns:
             g = df[gene_col].astype(str).str.strip()
             g = g.replace({"": np.nan, "nan": np.nan, "None": np.nan})

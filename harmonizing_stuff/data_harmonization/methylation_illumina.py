@@ -12,18 +12,17 @@ def methylation_probe_to_gene(
 ):
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    X = pd.read_parquet(methyl_path)  # probes × samples
+    X = pd.read_parquet(methyl_path)
     map_df = pd.read_csv(probe_to_gene_path)
 
     required_cols = {"probe_id", "gene_id"}
     if not required_cols.issubset(map_df.columns):
         raise ValueError(f"probe_to_gene must contain {required_cols}")
     
-    # Expect columns: probe_id, gene_id
     map_df["probe_id"] = map_df["probe_id"].astype(str).str.strip()
     map_df["gene_id"] = map_df["gene_id"].astype(str).str.strip()
 
-    # Join probe → gene
+    # Join probe to gene
     df = map_df.set_index("probe_id").join(X, how="inner")
 
     if df.empty:
@@ -31,7 +30,7 @@ def methylation_probe_to_gene(
 
     sample_cols = X.columns.tolist()
 
-    # Aggregate probes → gene
+    # Aggregate probes to gene
     if agg == "mean":
         Xg = df.groupby("gene_id")[sample_cols].mean()
     else:

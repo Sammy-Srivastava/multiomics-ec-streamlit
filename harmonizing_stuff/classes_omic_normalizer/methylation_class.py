@@ -16,7 +16,7 @@ class MethylationNormalizer(BaseNormalizer):
         max_probe_failure: float = 0.10,
         max_sample_failure: float = 0.05,
         epsilon: float = 1e-6,
-        output: str = "M",          # "M" for M-values, else keep beta-like
+        output: str = "M",
         zscore: bool = True,
         na_frac_threshold: float = 0.10,
     ):
@@ -36,7 +36,7 @@ class MethylationNormalizer(BaseNormalizer):
         self._detection_p: pd.DataFrame | None = None
         self.max_probes: int | None = None
 
-    #HEPLERS
+    #---helpers---
     
     def _clean_columns(self, cols):
         #cleans columns
@@ -77,7 +77,7 @@ class MethylationNormalizer(BaseNormalizer):
         return sorted(cols, key=fallback_key)
 
     def _read_geo_table(self, path: str) -> pd.DataFrame:
-        #reads produced matrix
+        # reads produced matrix
         p = Path(path)
         name = p.name.lower()
 
@@ -158,7 +158,7 @@ class MethylationNormalizer(BaseNormalizer):
         return shared, sig_map, pval_map
 
     def _classify_columns(self, df: pd.DataFrame):
-        #treating pvalues as detectionpvals
+        # treating pvalues as detectionpvals
         beta_cols, detp_cols = [], []
         for col in df.columns:
             col_lower = str(col).lower()
@@ -176,7 +176,7 @@ class MethylationNormalizer(BaseNormalizer):
                 beta_cols.append(col)
         return beta_cols, detp_cols
 
-    #API
+    #---API---
     def load_file(self, path: str, require_detection_pval: bool = True):
         df = self._read_geo_table(path)
         cols = pd.Index(df.columns.astype(str))
@@ -184,7 +184,7 @@ class MethylationNormalizer(BaseNormalizer):
         # Debug
         print("RAW methylation df.columns head:", df.columns[:10].tolist())
 
-        # 1) Intensity format (U/M)
+        # 1. Intensity format (unmethylated/methylated)
         has_u = cols.to_series().str.contains(r"unmethylated\s*signal", case=False, regex=True).any()
         has_m = cols.to_series().str.contains(r"methylated\s*signal", case=False, regex=True).any()
 
@@ -192,7 +192,7 @@ class MethylationNormalizer(BaseNormalizer):
             shared, u_map, m_map, p_map = self._intensity_maps(cols)
             if len(shared) == 0:
                 raise ValueError(
-                    "Methylation intensities detected, but no sample IDs had BOTH "
+                    "Methylation intensities detected, but no sample IDs had both"
                     "Unmethylated and Methylated signal columns."
                 )
 
@@ -323,7 +323,7 @@ class MethylationNormalizer(BaseNormalizer):
         # Mask extreme values
         beta = beta.mask(beta.abs() > 1e6) 
 
-        # NaN fraction filtering
+        # nan fraction filtering
         probe_keep2 = beta.isna().mean(axis=1) <= self.na_frac_threshold
         sample_keep2 = beta.isna().mean(axis=0) <= self.na_frac_threshold
         beta = beta.loc[probe_keep2, sample_keep2]

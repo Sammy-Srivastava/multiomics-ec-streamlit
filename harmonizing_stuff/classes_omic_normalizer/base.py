@@ -9,14 +9,13 @@ class BaseNormalizer(ABC):
         self.fitted = False
         self.report = {}
 
-    
     @abstractmethod
     #learn parameters
     def fit(self, X: pd.DataFrame | None = None, metadata=None):
         pass
 
     @abstractmethod
-    #applies parameters and transforms dataset
+    # applies parameters and transforms dataset
     def transform(self, **kwargs) -> pd.DataFrame:
         pass
 

@@ -20,15 +20,6 @@ def aggregate_methylation_probes_to_genes(
     agg: str = "median",
     min_probes_per_gene: int = 3,
 ) -> tuple[pd.DataFrame, dict]:
-    """
-    Inputs
-    - M_fxS: probes x samples methylation matrix (index = probe IDs, columns = sample IDs)
-    - mapping: DataFrame with columns ['probe_id','gene_id']
-
-    Returns
-    - G_gxS: genes x samples aggregated matrix
-    - report: dict of counts / diagnostics
-    """
     if not {"probe_id", "gene_id"}.issubset(mapping.columns):
         raise ValueError("Mapping file must contain columns: probe_id,gene_id")
 
@@ -42,7 +33,7 @@ def aggregate_methylation_probes_to_genes(
 
     # keep probes present in M
     probes_in_M = set(M.index)
-    mp = mp[mp["probe_id"].isin(probes_in_M)].copy()
+    mp = mp[mp["probxe_id"].isin(probes_in_M)].copy()
     if mp.empty:
         raise ValueError("No probe_id overlap between mapping file and methylation matrix index.")
 

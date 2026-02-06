@@ -38,7 +38,7 @@ DEFAULT_PROBE2GENE_PATH = project_root / "annotations" / "probe_to_gene.csv"
 ALLOWED_UPLOAD_EXT = {".csv", ".tsv", ".txt", ".parquet", ".gz"}
 BAD_EXT = (".raw", ".tar", ".mzml", ".wiff", ".d", ".cdf")
 
-OMIC_KEYS = {"M": "Methylation", "T": "Transcriptomics", "P": "Proteomics", "Mb": "Metabolomics", "G": "Genomics"}
+OMIC_KEYS = {"M": "Methylation", "T": "Transcriptomics", "P": "Proteomics"}
 _CANON_WS = re.compile(r"\s+")
 
 LABEL_COL_ALIASES = {
@@ -122,7 +122,7 @@ def read_matrix_shape(path: Path) -> Tuple[int, int]:
         if str(p).lower().endswith(".parquet"):
             df = pd.read_parquet(p)
         else:
-            df = pd.read_csv(p, index_col=0)
+            df = pd.read_csv(p, index_col=0, nrows=5)
         return (int(df.shape[0]), int(df.shape[1]))
     except Exception:
         return (0, 0)
@@ -722,6 +722,10 @@ with tab_train:
     oof_dir = run_dir / "oof"
     oof_dir.mkdir(parents=True, exist_ok=True)
 
+    if IS_CLOUD:
+        st.warning('Training is disabled on Streamlit Cloud')
+        st.stop()
+        
     if st.button("Run training", type="primary"):
         scripts = {
             "T": find_training_script("train_transcriptomics.py"),
@@ -770,8 +774,8 @@ with tab_train:
                 cmd += ["--labels", str(Path(labels_path_str))]
 
             # Transcriptomics-only: sample_map required
-            if k == "T" and _supports_any(sp, ["--sample_map"]):
-                cmd += ["--sample_map", str(t_map_path)]
+            if k == "T" and _supports_any(sp, ["--sample_map"]) and t_map_path is not None:
+                cmd += ["--sample_map", str(t_map_path)]    
 
             #CV + seed flags
             if _supports_any(sp, ["--n_splits_max"]):
@@ -807,9 +811,7 @@ with tab_train:
         st.success("Training complete.")
         st.write("OOF files:", [p.name for p in sorted(oof_dir.glob("*.csv"))])
     
-    if IS_CLOUD:
-        st.warning('Training is disabled on Streamlit Cloud')
-        st.stop()
+    
 
 # ---6. Combine---
 with tab_combine:

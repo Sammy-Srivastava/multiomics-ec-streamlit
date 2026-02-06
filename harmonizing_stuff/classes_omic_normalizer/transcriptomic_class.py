@@ -33,12 +33,10 @@ class TranscriptomicNormalizer(BaseNormalizer):
         self.fitted = False
         self.report = {}
 
-    #HELPERS
+    #---helpers---
     def read_counts_matrix(self, path: str) -> pd.DataFrame:
         p = Path(path)
         name = p.name.lower()
-
-        # Parquet file read
         if name.endswith(".parquet"):
             df = pd.read_parquet(p)
             if df is None or df.shape[0] == 0 or df.shape[1] == 0:
@@ -47,7 +45,7 @@ class TranscriptomicNormalizer(BaseNormalizer):
             df.index = df.index.astype(str).str.strip()
             df.columns = df.columns.astype(str).str.strip()
 
-            # Ensure numeric (parquet sometimes preserves object dtype if created oddly)
+            # Ensure numeric since parquet sometimes preserves object dtype if created weirdly
             df = df.apply(pd.to_numeric, errors="coerce")
 
             if df.shape[1] < 2:
@@ -60,7 +58,7 @@ class TranscriptomicNormalizer(BaseNormalizer):
         sep = "\t" if name.endswith((".tsv", ".txt", ".tsv.gz", ".txt.gz")) else ","
         compression = "gzip" if name.endswith(".gz") else None
 
-        # C path (fast path)
+        # C path/fast path
         last_err = None
         try:
             df = pd.read_csv(
@@ -125,7 +123,7 @@ class TranscriptomicNormalizer(BaseNormalizer):
         df.index = df.index.astype(str).str.strip()
         df.columns = df.columns.astype(str).str.strip()
 
-        # Numeric coercion once (avoid repeating this in load_files)
+        # Numeric coercion once 
         df = df.apply(pd.to_numeric, errors="coerce")
 
         if df.shape[1] < 2:
@@ -133,9 +131,6 @@ class TranscriptomicNormalizer(BaseNormalizer):
                 f"Parsed text but <2 sample cols. Shape={df.shape}. "
                 f"Columns head={df.columns.tolist()[:10]}"
             )
-
-        # Reduce memory footprint (safe for counts/log)
-        # df = df.astype("float32")
 
         return df
 
@@ -177,7 +172,7 @@ class TranscriptomicNormalizer(BaseNormalizer):
 
         return self
 
-    # QC / Normalization
+    # QC / normalization
     def fit(self, X: pd.DataFrame = None, metadata=None):
         if X is None:
             if self._raw_X is None:
@@ -190,21 +185,21 @@ class TranscriptomicNormalizer(BaseNormalizer):
         self.report["initial_genes"] = int(X.shape[0])
         self.report["initial_samples"] = int(X.shape[1])
 
-        # Gene filter
+        # gene filter
         expressed_mask = X > self.min_expression
         expression_fraction = expressed_mask.mean(axis=1)
         genes_to_keep = expression_fraction >= self.min_sample_fraction
         X = X.loc[genes_to_keep]
         self.report["genes_removed"] = int((~genes_to_keep).sum())
 
-        # Sample filter (library size)
+        #Sample filter (library size)
         library_sizes = X.sum(axis=0, skipna=True)
         cutoff = np.percentile(library_sizes.values, self.min_library_percentile)
         samples_to_keep = library_sizes >= cutoff
         X = X.loc[:, samples_to_keep]
         self.report["samples_removed"] = int((~samples_to_keep).sum())
 
-        # log transform
+        # log2 transformation
         if self.log1p:
             X_work = np.log2(X + 1.0)
             self.report["log_transform"] = "log2(x+1)"
