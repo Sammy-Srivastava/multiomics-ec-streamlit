@@ -31,13 +31,13 @@ def aggregate_methylation_probes_to_genes(
     mp["probe_id"] = mp["probe_id"].astype(str)
     mp["gene_id"] = mp["gene_id"].astype(str)
 
-    # keep probes present in M
+    # keeping probes present in M
     probes_in_M = set(M.index)
     mp = mp[mp["probxe_id"].isin(probes_in_M)].copy()
     if mp.empty:
         raise ValueError("No probe_id overlap between mapping file and methylation matrix index.")
 
-    # count probes per gene and filter
+    # counting probes per gene and filter
     gene_counts = mp.groupby("gene_id")["probe_id"].nunique().sort_values(ascending=False)
     keep_genes = gene_counts[gene_counts >= int(min_probes_per_gene)].index
     mp = mp[mp["gene_id"].isin(keep_genes)].copy()
@@ -54,7 +54,7 @@ def aggregate_methylation_probes_to_genes(
     genes = []
     for gene, probes in gene_to_probes.items():
         block = M.loc[probes].to_numpy(dtype=float)  # probes x samples
-        vec = fn(block, axis=0)                      # samples
+        vec = fn(block, axis=0)  # samples
         out.append(vec)
         genes.append(gene)
 

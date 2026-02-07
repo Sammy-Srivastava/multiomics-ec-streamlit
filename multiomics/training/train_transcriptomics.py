@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,18 +13,11 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score, balanced_accuracy_score, confusion_matrix, f1_score
 from sklearn.impute import SimpleImputer
 
-
-# ----------------------------
-# Defaults
-# ----------------------------
 DEFAULT_VAR_THRESHOLD = 1e-8
 DEFAULT_MODEL_C = 0.03
 DEFAULT_K_BEST = 100
 
-
-# ----------------------------
-# ID utilities
-# ----------------------------
+# ---ID utilities---
 def dequote(s: str) -> str:
     s = str(s).strip()
     if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
@@ -38,22 +30,13 @@ def normalize_id(s: str) -> str:
 
 
 def split_suffix(col: str):
-    # e.g. EC5_03.signal -> (EC5_03, .signal)
     col = normalize_id(col)
     m = re.match(r"^(.*?)(\.(signal|pvalue))$", col, flags=re.IGNORECASE)
     if m:
-        return m.group(1), m.group(2)  # base, suffix
+        return m.group(1), m.group(2)
     return col, ""
 
-
-# ----------------------------
-# IO
-# ----------------------------
 def load_sample_map(path: Path) -> dict[str, str]:
-    """
-    Loads token->GSM mapping. Supports common column pairs:
-      old_sample/new_sample OR sample/gsm OR sample_id/gsm OR s/gsm OR token/gsm OR old/new
-    """
     m = pd.read_csv(path)
     m = m.rename(columns={c: c.strip().lower() for c in m.columns})
 
@@ -87,12 +70,6 @@ def load_sample_map(path: Path) -> dict[str, str]:
 
 
 def load_X(path: Path, rename_map: dict[str, str] | None) -> pd.DataFrame:
-    """
-    Reads features x samples parquet and returns samples x features.
-    If rename_map is provided, renames token columns to GSM-style IDs.
-    Handles paired channels (.signal/.pvalue) by expanding into feature suffixes:
-      geneA__signal, geneA__pvalue, ...
-    """
     X_fxS = pd.read_parquet(path)
     X_fxS.columns = X_fxS.columns.astype(str).map(normalize_id)
 
@@ -121,11 +98,11 @@ def load_X(path: Path, rename_map: dict[str, str] | None) -> pd.DataFrame:
         X_fxS2 = X_fxS.copy()
         X_fxS2.columns = mi
 
-        tmp = X_fxS2.T  # (sample,channel) x features
+        tmp = X_fxS2.T
 
         parts = []
         for ch in tmp.index.get_level_values("channel").unique():
-            part = tmp.xs(ch, level="channel", drop_level=True)  # sample x features
+            part = tmp.xs(ch, level="channel", drop_level=True)
             part.columns = [f"{f}__{ch}" for f in part.columns]
             parts.append(part)
 
@@ -133,20 +110,13 @@ def load_X(path: Path, rename_map: dict[str, str] | None) -> pd.DataFrame:
         X.index = X.index.astype(str).map(normalize_id)
         return X
 
-    # non-channel: simple transpose
+    # transpose
     X = X_fxS.T
     X.index = X.index.astype(str).map(normalize_id)
     return X
 
 
 def load_y(path: Path, pos_label: str = "EC", neg_label: str = "ART") -> pd.Series:
-    """
-    Accepts either:
-      - sample_id,label where label contains strings (e.g., EC/ART/HC)
-      - sample_id,y where y is 0/1
-    Drops samples not in {pos_label, neg_label} for string labels.
-    Ignores any extra columns (source/modality/etc).
-    """
     df = pd.read_csv(path)
     df.columns = [str(c).strip() for c in df.columns]
     cols = {c.lower(): c for c in df.columns}
@@ -155,7 +125,7 @@ def load_y(path: Path, pos_label: str = "EC", neg_label: str = "ART") -> pd.Seri
     if sid_col is None:
         raise ValueError(f"Labels file must include sample_id. Found: {df.columns.tolist()}")
 
-    # prefer y if present; else label/target
+    # prefer y if present or else label/target
     y_col = cols.get("y") or cols.get("label") or cols.get("target")
     if y_col is None:
         raise ValueError(f"Labels file must include y or label. Found: {df.columns.tolist()}")
@@ -164,7 +134,6 @@ def load_y(path: Path, pos_label: str = "EC", neg_label: str = "ART") -> pd.Seri
 
     y_raw = df[y_col]
 
-    # numeric y?
     y_num = pd.to_numeric(y_raw, errors="coerce")
     if y_num.notna().mean() > 0.95:
         y = y_num.dropna().astype(int)
@@ -194,10 +163,7 @@ def align_Xy(X: pd.DataFrame, y: pd.Series) -> tuple[pd.DataFrame, pd.Series]:
         raise ValueError("No overlapping sample IDs between X and y.")
     return X.loc[common].copy(), y.loc[common].copy()
 
-
-# ----------------------------
-# Modeling helpers
-# ----------------------------
+# ---Modeling helpers---
 def _safe_n_splits(y_np: np.ndarray, requested: int) -> int:
     n_pos = int((y_np == 1).sum())
     n_neg = int((y_np == 0).sum())
@@ -226,13 +192,6 @@ def _fit_transform_with_meta(
     k_best: int,
     var_threshold: float,
 ):
-    """
-    Fold-safe preprocessing + returns selected feature names aligned to final columns.
-      1) variance filter (train only)
-      2) impute
-      3) scale
-      4) SelectKBest
-    """
     vt = VarianceThreshold(threshold=float(var_threshold))
     X_tr1 = vt.fit_transform(X_tr)
     X_te1 = vt.transform(X_te)
@@ -278,7 +237,7 @@ def logistic_cv_oof(
 
     n_splits_safe = _safe_n_splits(y_np, n_splits)
     if n_splits_safe != int(n_splits):
-        print(f"[T] Adjusted n_splits {n_splits} -> {n_splits_safe} due to class counts.")
+        print(f"Adjusted n_splits {n_splits} -> {n_splits_safe} due to class counts.")
     cv = StratifiedKFold(n_splits=n_splits_safe, shuffle=True, random_state=int(seed))
 
     oof_proba = pd.Series(index=X.index, dtype=float)
@@ -308,7 +267,7 @@ def logistic_cv_oof(
         )
         clf.fit(X_tr3, y_tr)
 
-        # threshold chosen on TRAIN only
+        # threshold chosen on train only
         p_tr = clf.predict_proba(X_tr3)[:, 1]
         thr = pick_threshold_max_f1_no_collapse(y_tr, p_tr)
 
@@ -334,9 +293,9 @@ def logistic_cv_oof(
     mean_bacc, std_bacc = float(np.mean(baccs)), float(np.std(baccs))
     cm_sum = np.sum(cms, axis=0)
 
-    print("\n[T] CV summary")
-    print(f"AUC mean±std: {mean_auc:.3f} ± {std_auc:.3f}")
-    print(f"BalAcc mean±std: {mean_bacc:.3f} ± {std_bacc:.3f}")
+    print("\nCV summary")
+    print(f"AUC mean plus or minus std: {mean_auc:.3f} plus or minus {std_auc:.3f}")
+    print(f"BalAcc mean±std: {mean_bacc:.3f} plus or minus {std_bacc:.3f}")
     print("Confusion matrix (rows=true [0,1], cols=pred [0,1]):")
     print(cm_sum)
 
@@ -394,10 +353,6 @@ def fit_final_and_export_features(
 
     return feat_df
 
-
-# ----------------------------
-# MAIN
-# ----------------------------
 def main():
     ap = argparse.ArgumentParser(
         description="Train transcriptomics classifier with OOF CV; export feature importance + stability table."
@@ -406,24 +361,19 @@ def main():
     ap.add_argument("--matrix", required=True, help="Path to T_harmonized.parquet (features x samples)")
     ap.add_argument("--out_dir", required=True, help="Output directory to write OOF + feature files")
     ap.add_argument("--labels", required=True, help="Labels CSV with sample_id,label OR sample_id,y")
-
-    # optional sample map
     ap.add_argument(
         "--sample_map",
         required=False,
         default=None,
         help="Optional mapping CSV (token->GSM). If omitted, uses matrix columns as sample IDs.",
     )
-
     ap.add_argument("--n_splits", type=int, default=5)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--k_best", type=int, default=DEFAULT_K_BEST)
     ap.add_argument("--model_c", type=float, default=DEFAULT_MODEL_C)
     ap.add_argument("--var_threshold", type=float, default=DEFAULT_VAR_THRESHOLD)
-
     ap.add_argument("--pos_label", type=str, default="EC")
     ap.add_argument("--neg_label", type=str, default="ART")
-
     args = ap.parse_args()
 
     T_PATH = Path(args.matrix)
@@ -460,7 +410,7 @@ def main():
     y = load_y(Y_PATH, pos_label=args.pos_label, neg_label=args.neg_label)
 
     X, y = align_Xy(X, y)
-    print(f"[T] Aligned: X={X.shape} (samples x features) | y={y.value_counts().to_dict()}")
+    print(f" Aligned: X={X.shape} (samples x features) | y={y.value_counts().to_dict()}")
 
     oof_proba, oof_pred = logistic_cv_oof(
         X,

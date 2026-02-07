@@ -14,9 +14,7 @@ oof_files = ['oof_methylation.csv', 'oof_transcriptomics.csv', 'proteomics_subje
 OUT_DIR = 'board_figures'
 out_name = 'modality_performance_auc'
 
-# =========================
-# VISUAL STYLE
-# =========================
+# ---style---
 MODALITY_ORDER = ["transcriptomics", "proteomics", "methylation"]
 MODALITY_COLORS = {
     "transcriptomics": "#1E5AA8",  # deep blue
@@ -26,7 +24,7 @@ MODALITY_COLORS = {
 }
 
 def apply_clean_axes(ax):
-    """Minimalist axes styling."""
+    """axes styling."""
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.tick_params(axis="both", labelsize=11)
@@ -37,9 +35,7 @@ def apply_clean_axes(ax):
 def modality_color_list(modalities):
     return [MODALITY_COLORS.get(str(m).lower(), MODALITY_COLORS["unknown"]) for m in modalities]
 
-# =========================
-# OOF PARSER (UNCHANGED)
-# =========================
+# ---oof parser---
 def read_oof_loose_csv(path: Path) -> pd.DataFrame:
     allowed = {"transcriptomics", "proteomics", "methylation"}
 
@@ -152,13 +148,11 @@ def read_oof_loose_csv(path: Path) -> pd.DataFrame:
     if df.empty:
         raise ValueError(
             f"{path}: Could not parse any rows. "
-            "If this persists, your file may not include both probability and y labels."
+            "your file may not include both probability and y labels."
         )
     return df
 
-# =========================
-# METRICS
-# =========================
+# ---metrics---
 def compute_metrics(df: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for modality, g in df.groupby('modality'):
@@ -187,9 +181,7 @@ def compute_metrics(df: pd.DataFrame) -> pd.DataFrame:
     out = out.sort_values("order").drop(columns=["order"]).reset_index(drop=True)
     return out
 
-# =========================
-# BAR PLOTS (FIXED LABEL PLACEMENT)
-# =========================
+# ---bar plot---
 def plot_auc_bar(metrics: pd.DataFrame, out_prefix: Path):
     fig = plt.figure(figsize=(7.8, 4.8))
     ax = plt.gca()
@@ -214,12 +206,11 @@ def plot_auc_bar(metrics: pd.DataFrame, out_prefix: Path):
     ax.grid(axis="y", linestyle="--", linewidth=0.6, alpha=0.35)
     ax.set_axisbelow(True)
 
-    # --- FIX: keep value labels from colliding with title/top ---
     y_min, y_max = ax.get_ylim()
     top = y_max
 
-    label_pad = 0.02      # normal offset above bar
-    min_headroom = 0.07   # keep at least this much space below the top
+    label_pad = 0.02      
+    min_headroom = 0.07   
     clamp_y = top - min_headroom
 
     for i, v in enumerate(auc_vals):
@@ -229,7 +220,6 @@ def plot_auc_bar(metrics: pd.DataFrame, out_prefix: Path):
         y_text = v + label_pad
         va = "bottom"
 
-        # If it would get too close to the top/title region, place it inside the bar instead
         if y_text >= clamp_y:
             y_text = max(v - 0.035, 0.02)  # inside bar, readable
             va = "top"
@@ -298,9 +288,7 @@ def plot_bacc_bar(metrics: pd.DataFrame, out_prefix: Path):
     fig.savefig(out_prefix.with_suffix(".pdf"))
     plt.close(fig)
 
-# =========================
-# ROC PLOT (UPGRADED)
-# =========================
+# --roc plot---
 def plot_roc_by_modality(all_df: pd.DataFrame, out_prefix: Path):
     fig = plt.figure(figsize=(7.8, 5.8))
     ax = plt.gca()
@@ -308,7 +296,7 @@ def plot_roc_by_modality(all_df: pd.DataFrame, out_prefix: Path):
     present = set(all_df["modality"].astype(str).str.lower().unique().tolist())
     ordered_modalities = [m for m in MODALITY_ORDER if m in present] + sorted(list(present - set(MODALITY_ORDER)))
 
-    # Chance line (subtle)
+    # Chance line 
     ax.plot([0, 1], [0, 1], linestyle="--", linewidth=1.2, color="#333333", alpha=0.7)
 
     for modality in ordered_modalities:
@@ -336,7 +324,6 @@ def plot_roc_by_modality(all_df: pd.DataFrame, out_prefix: Path):
             alpha=alpha_line,
             label=f"{modality.title()} (AUC = {auc:.3f})"
         )
-        # Fill under curve (subtle)
         ax.fill_between(fpr, 0, tpr, color=color, alpha=alpha_fill)
 
     ax.set_xlim(0, 1)
@@ -360,9 +347,6 @@ def plot_roc_by_modality(all_df: pd.DataFrame, out_prefix: Path):
     fig.savefig(out_prefix.with_suffix(".pdf"))
     plt.close(fig)
 
-# =========================
-# MAIN
-# =========================
 def main():
     out_dir = Path(OUT_DIR)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -384,7 +368,7 @@ def main():
     plot_bacc_bar(metrics, out_dir / "modality_performance_bacc")
     plot_roc_by_modality(all_df, out_dir / "roc_by_modality")
 
-    print("[OK] Generated:")
+    print("Generated:")
     print(" -", out_dir / f"{out_name}.png")
     print(" -", out_dir / f"{out_name}.pdf")
     print(" -", out_dir / "modality_performance_bacc.png")

@@ -49,8 +49,8 @@ LABEL_COL_ALIASES = {
 IS_CLOUD = bool(st.secrets.get('STREAMLIT_CLOUD', False)) or bool(os.environ.get('STREAMLIT_SERVER_RUNNING', ''))
 
 # ---Page config---
-st.set_page_config(page_title="Omics Harmonizer", layout="wide")
-st.title("Omics Harmonizer Dashboard")
+st.set_page_config(page_title="Multi-omics Dashboard", layout="wide")
+st.title("Multi-Omics Dashboard")
 st.caption("Upload → Harmonize → Train unimodal models → Combine → Board exports")
 
 
@@ -452,7 +452,9 @@ with tab_select:
         prot_file = st.selectbox("Proteomics (P)", options=["(none)"] + relpaths, index=0, key="sb_p")
 
     st.subheader("Harmonization settings")
-    sample_strategy = st.selectbox("Sample handling", ["union", "intersection"], index=0, key="sb_strategy")
+    sample_strategy = "union"
+    st.info("Sample handling is fixed to: union. ")
+    st.session_state['sb_strategy'] = "union"
     out_format = st.selectbox("Output format", ["parquet", "csv"], index=0, key="sb_outfmt")
     preview_rows = st.number_input("Preview rows (head only)", min_value=5, max_value=200, value=25, step=5, key="ni_preview_rows")
 
@@ -528,7 +530,8 @@ with tab_harmonize:
     if st.session_state.get("sb_p") and st.session_state["sb_p"] != "(none)":
         in_paths["P"] = upload_dir / st.session_state["sb_p"]
 
-    sample_strategy = st.session_state.get("sb_strategy", "union")
+    sample_strategy = "union"
+    st.session_state["sb_strategy"] = "union"
     out_format = st.session_state.get("sb_outfmt", "parquet")
 
     if not in_paths:
@@ -577,7 +580,7 @@ with tab_harmonize:
                     in_paths=in_paths,
                     out_dir=run_dir,
                     out_format=out_format,
-                    sample_strategy=sample_strategy,
+                    sample_strategy="union",
                 )
 
             outputs = {k: str(v) for k, v in res.paths.items()}

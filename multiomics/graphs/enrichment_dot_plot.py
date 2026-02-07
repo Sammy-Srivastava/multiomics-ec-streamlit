@@ -9,10 +9,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-
-# =========================
-# EDIT THESE PATHS
-# =========================
 TRANSCRIPTOMIC_ENRICH = "multiomics/results/transcriptomic_enrichment_results.csv"
 PROTEOMIC_ENRICH     = "multiomics/results/proteomic_enrichment_results.csv"
 
@@ -20,16 +16,11 @@ OUT_DIR = "multiomics/results/board_figures/enrichment_viz"
 TOPK_PER_MODALITY = 12
 
 
-# =========================
-# VISUAL SETTINGS
-# =========================
+# ---visual settings---
 CMAP = "Blues"
 FIG_DPI = 300
 
-
-# =========================
-# HELPERS
-# =========================
+# ---helpers---
 def safe_bool_series(s: pd.Series) -> pd.Series:
     if s.dtype == bool:
         return s
@@ -70,10 +61,7 @@ def apply_clean_axes(ax):
     ax.xaxis.label.set_size(12)
     ax.yaxis.label.set_size(12)
 
-
-# =========================
-# LOAD ENRICHMENT
-# =========================
+# ---Enrichment load---
 def load_enrichment(csv_path: str, modality: str) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
 
@@ -115,10 +103,7 @@ def select_top_terms(df: pd.DataFrame, topk: int) -> pd.DataFrame:
           .copy()
     )
 
-
-# =========================
-# DOT PLOT
-# =========================
+# ---dot plot---
 def plot_dot_matrix(df: pd.DataFrame, out_path: Path):
     term_order = (
         df.groupby("term")["neglog10_p"]
@@ -176,7 +161,7 @@ def plot_dot_matrix(df: pd.DataFrame, out_path: Path):
     cbar.set_label(r"$-\log_{10}(p\mathrm{-value})$")
 
     plt.tight_layout()
-    # ✅ CENTERED FOR BOARD
+    # centering
     plt.subplots_adjust(left=0.46)
 
     fig.savefig(out_path.with_suffix(".png"), dpi=FIG_DPI)
@@ -184,9 +169,6 @@ def plot_dot_matrix(df: pd.DataFrame, out_path: Path):
     plt.close(fig)
 
 
-# =========================
-# MAIN
-# =========================
 def main():
     out_dir = Path(OUT_DIR)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -200,7 +182,7 @@ def main():
 
     keep.to_csv(out_dir / "enrichment_terms_used.csv", index=False)
 
-    print("[OK] Generated centered enrichment dot plot.")
+    print("Generated centered enrichment dot plot.")
 
 
 if __name__ == "__main__":

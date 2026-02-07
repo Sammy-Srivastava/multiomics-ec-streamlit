@@ -41,7 +41,7 @@ df = pd.DataFrame({
     'label': labels
 })
 
-# Safety check (now should PASS)
+# sanity check
 if (df['label'] == 'Unknown').any():
     bad = df.loc[df['label'] == 'Unknown', 'sample_id'].tolist()
     raise ValueError(f'Unknown labels for samples: {bad}')

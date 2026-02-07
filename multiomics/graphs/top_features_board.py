@@ -269,7 +269,7 @@ def main():
         topk=TOPK,
     )
 
-    print("[OK] Wrote:")
+    print("Wrote:")
     print(" -", out_dir / "top10_transcriptomics_features.png")
     print(" -", out_dir / "top10_proteomics_features.png")
     print(" -", out_dir / "top10_methylation_features.png")

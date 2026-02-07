@@ -78,11 +78,11 @@ def multiharmonize(
     in_paths: Dict[str, Path],
     out_dir: Path,
     *,
-    sample_strategy: str = "union",               # "union" or "intersection"
-    union_missing: str = "keep_nan",              # "keep_nan" or "fill_zero" (only for union)
-    out_format: str = "parquet",                  # "parquet" or "csv"
+    sample_strategy: str = "union",               
+    union_missing: str = "keep_nan",              
+    out_format: str = "parquet",                  
 
-    transcriptomics_series_matrix: Optional[Path] = None,  # keep if your T normalizer needs it
+    transcriptomics_series_matrix: Optional[Path] = None,  
 
     # Caps
     cap_M_probes: int = 20000,

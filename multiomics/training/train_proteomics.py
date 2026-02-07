@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,10 +13,6 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score, balanced_accuracy_score, confusion_matrix
 
-
-# ----------------------------
-# DEFAULTS (match your current script)
-# ----------------------------
 SEED = 42
 N_SPLITS_MAX = 5
 
@@ -26,9 +21,6 @@ VAR_THRESHOLD = 1e-8
 K_GRID = [25, 50, 100, 200, 300]
 C_GRID = [0.01, 0.03, 0.1, 0.3, 1.0]
 
-# representation control
-# "mean"  : subject vector = mean(plus, minus) (recommended for tiny n)
-# "blocks": subject vector = [PLUS__, MINUS__] concatenated (optional DELTA__)
 REPRESENTATION = "mean"
 INCLUDE_DELTA = False
 
@@ -40,15 +32,11 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--matrix", required=True, help="Path to harmonized proteomics matrix (features x samples).")
     ap.add_argument("--labels", required=True, help="CSV with columns sample_id,y (0/1). sample_id like ART01_plus.")
     ap.add_argument("--out_dir", required=True, help="Directory to write outputs.")
-
     ap.add_argument("--seed", type=int, default=SEED)
     ap.add_argument("--n_splits_max", type=int, default=N_SPLITS_MAX)
-
     ap.add_argument("--var_threshold", type=float, default=VAR_THRESHOLD)
-
     ap.add_argument("--k_grid", default="25,50,100,200,300", help="Comma-separated K grid for SelectKBest.")
     ap.add_argument("--c_grid", default="0.01,0.03,0.1,0.3,1.0", help="Comma-separated C grid for LogisticRegression.")
-
     ap.add_argument(
         "--representation",
         choices=["mean", "blocks"],
@@ -62,10 +50,7 @@ def parse_args() -> argparse.Namespace:
     )
     return ap.parse_args()
 
-
-# ----------------------------
-# ID parsing
-# ----------------------------
+# ---ID parsing---
 def _clean_id(s: str) -> str:
     s = str(s).strip()
     if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
@@ -78,17 +63,10 @@ def _tok(s: str) -> str:
 
 
 def _parse_proteomics_sample_id(col: str) -> str | None:
-    """
-    Converts:
-      Abundance:_F7:_126,_Sample,_ART01,_Pos,_B1  -> ART01_plus
-      ...,_EC04,_Neg,_B2                         -> EC04_minus
-    Drops:
-      ...,_Norm,_Norm,_B1                        -> None
-    """
     c = str(col).strip().strip('"').strip("'")
     parts = [p.strip() for p in c.split(",") if p.strip()]
 
-    # already normalized?
+    # check if already normalized
     if re.fullmatch(r"(ART|EC|HC)\d{2}_(plus|minus)", c, flags=re.IGNORECASE):
         m = re.match(r"^((?:ART|EC|HC)\d{2})_(plus|minus)$", c, flags=re.IGNORECASE)
         if m:
@@ -121,10 +99,7 @@ def _parse_proteomics_sample_id(col: str) -> str | None:
 def subject_from_sample_id(sample_id: str) -> str:
     return str(sample_id).split("_")[0]
 
-
-# ----------------------------
-# Load X/Y (sample-level)
-# ----------------------------
+# ---Load x/y---
 def load_X_samples(p_path: Path) -> pd.DataFrame:
     if str(p_path).lower().endswith(".parquet"):
         X_fxS = pd.read_parquet(p_path)
@@ -146,11 +121,11 @@ def load_X_samples(p_path: Path) -> pd.DataFrame:
     X_fxS = X_fxS.rename(columns=rename)
     X_fxS.columns = X_fxS.columns.astype(str).str.strip()
 
-    # duplicates can happen after parsing (e.g., ART01 appears twice)
+    # dupe check
     if pd.Index(X_fxS.columns).duplicated().any():
         X_fxS = X_fxS.groupby(level=0, axis=1).mean()
 
-    # samples x proteins
+    # transpose
     X = X_fxS.T
     X.index = X.index.astype(str).str.strip()
 
@@ -177,7 +152,7 @@ def load_y_samples(y_path: Path) -> pd.Series:
     y_raw = df.set_index("sample_id")["y"]
     y_raw.index = y_raw.index.astype(str).str.strip()
 
-    # If numeric 0/1 already, keep it
+    # keep if numeric 0/1 already
     y_num = pd.to_numeric(y_raw, errors="coerce")
     if y_num.notna().all():
         y_out = y_num.astype(int)
@@ -187,11 +162,11 @@ def load_y_samples(y_path: Path) -> pd.Series:
         print("Sample-level y counts:", y_out.value_counts().to_dict())
         return y_out
 
-    # Otherwise map strings like ART/EC/HC -> 0/1
+    # Otherwise map strings like ART/EC/HC to 0/1
     y_str = y_raw.astype(str).str.strip().str.upper()
     print("Raw label uniques:", sorted(y_str.unique().tolist()))
 
-    # Positive class = EC (change if you want different binary task)
+    # Positive class = EC
     mapping = {"EC": 1, "ART": 0, "HC": 0}
 
     unknown = sorted(set(y_str.unique()) - set(mapping.keys()))
@@ -214,14 +189,10 @@ def align_sample_level(X: pd.DataFrame, y: pd.Series) -> tuple[pd.DataFrame, pd.
         raise ValueError("No overlapping sample IDs between X and y at sample-level.")
     return X.loc[common].copy(), y.loc[common].copy()
 
-
-# ----------------------------
-# Subject-level construction
-# ----------------------------
+# ---Subject-level construction---
 def build_subject_mean(X_samp: pd.DataFrame, y_samp: pd.Series) -> tuple[pd.DataFrame, pd.Series]:
     """
-    Subject vector = mean(plus, minus) over available rows.
-    Usually most stable when n_subjects is small.
+    Subject vector = mean over available rows.
     """
     y_df = y_samp.to_frame("y")
     y_df["__subject__"] = y_df.index.map(subject_from_sample_id)
@@ -267,7 +238,7 @@ def build_subject_mean(X_samp: pd.DataFrame, y_samp: pd.Series) -> tuple[pd.Data
 
 def build_subject_blocks(X_samp: pd.DataFrame, y_samp: pd.Series, include_delta: bool) -> tuple[pd.DataFrame, pd.Series]:
     """
-    Subject vector = concatenation of PLUS__ and MINUS__ (and optionally DELTA__).
+    Subject vector = concatenation of PLUS__ and MINUS__.
     """
     y_df = y_samp.to_frame("y")
     y_df["__subject__"] = y_df.index.map(subject_from_sample_id)
@@ -316,10 +287,7 @@ def build_subject_blocks(X_samp: pd.DataFrame, y_samp: pd.Series, include_delta:
     print(f"Subject-blocks: X {X_subj.shape} | y {y_out.value_counts().to_dict()} | n_subjects={X_subj.shape[0]}")
     return X_subj, y_out
 
-
-# ----------------------------
-# Pipeline pieces
-# ----------------------------
+# ---Pipeline pieces---
 def _fit_transform_fold(
     X_tr: np.ndarray,
     y_tr: np.ndarray,
@@ -328,14 +296,6 @@ def _fit_transform_fold(
     var_threshold: float,
     min_present_frac: float = 0.7,
 ):
-    """
-    Fold-safe preprocessing:
-      1) drop columns with too many NaNs in TRAIN
-      2) variance filter
-      3) impute
-      4) scale
-      5) SelectKBest
-    """
     present_frac = np.mean(np.isfinite(X_tr), axis=0)
     keep = present_frac >= float(min_present_frac)
 
@@ -437,13 +397,6 @@ def nested_cv_oof_tuned(
     c_grid: list[float],
     out_fi_all_folds: Path,
 ):
-    """
-    Outer CV: estimate performance, produce OOF probabilities at SUBJECT level.
-    Inner CV: select (K, C) maximizing mean AUC on training folds.
-
-    Exports per-fold selected-feature importances for stability:
-      feature_id, fold, importance (abs LR coef)
-    """
     X_np = X.to_numpy(dtype=float)
     y_np = y.to_numpy(dtype=int)
     feat_names_full = X.columns.to_numpy(dtype=str)
@@ -557,7 +510,7 @@ def nested_cv_oof_tuned(
 
     print("\n[proteomics] NESTED-CV summary")
     print(f"AUC mean±std: {mean_auc:.3f} ± {std_auc:.3f}")
-    print(f"BalAcc mean±std: {mean_bacc:.3f} ± {std_bacc:.3f}")
+    print(f"BalAcc mean±std: {mean_bacc:.3f} plus or minus {std_bacc:.3f}")
     print("Confusion matrix summed:")
     print(cm_sum)
 
@@ -581,10 +534,6 @@ def fit_final_and_export_features(
     k_grid: list[int],
     c_grid: list[float],
 ) -> pd.DataFrame:
-    """
-    Fit a final model on all subject rows for interpretability export.
-    Picks best (k, C) via CV on full dataset, then fits on all data.
-    """
     X_np = X.to_numpy(dtype=float)
     y_np = y.to_numpy(dtype=int)
 
@@ -660,10 +609,6 @@ def fit_final_and_export_features(
     )
     return feat_df
 
-
-# ----------------------------
-# MAIN
-# ----------------------------
 def main():
     args = parse_args()
 
@@ -672,7 +617,6 @@ def main():
     OUT_DIR = Path(args.out_dir)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Output stays ensemble-compatible (sample_id-level OOF)
     OUT_OOF = OUT_DIR / "proteomics_subject_mean_oof.csv"
     OUT_FEATS = OUT_DIR / "proteomics_subject_mean_feature_importance.csv"
     OUT_FI_ALL_FOLDS = OUT_DIR / "fi_P_all_folds.csv"
@@ -687,7 +631,7 @@ def main():
     rep = str(args.representation).lower()
     include_delta = bool(args.include_delta)
 
-    print("\n=== RUN: PROTEOMICS (tuned, stable CV) ===")
+    print("\nRUN: PROTEOMICS (tuned, stable CV)")
     print("matrix:", P_PATH)
     print("labels:", Y_PATH)
     print("out_dir:", OUT_DIR)
@@ -710,7 +654,7 @@ def main():
     else:
         raise ValueError("representation must be 'mean' or 'blocks'")
 
-    # tuned subject-level OOF predictions (nested CV) + fi_all_folds export
+    # tuned subject-level OOF predictions and fi_all_folds export
     oof_proba_subj, _oof_pred_subj = nested_cv_oof_tuned(
         X_subj,
         y_subj,
@@ -722,7 +666,7 @@ def main():
         out_fi_all_folds=OUT_FI_ALL_FOLDS,
     )
 
-    # Export OOF at sample_id-level for ensemble (each sample gets its subject's OOF probability)
+    # Export OOF at sample_id-level
     rows = []
     for sample_id, yval in y_samp.items():
         subj = subject_from_sample_id(sample_id)

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,10 +16,6 @@ from sklearn.feature_selection import VarianceThreshold, SelectKBest, f_classif
 from sklearn.metrics import roc_auc_score, balanced_accuracy_score, confusion_matrix
 from sklearn.impute import SimpleImputer
 
-
-# ----------------------------
-# CONFIG
-# ----------------------------
 PROJECT = Path("/Users/samyaksrivastava/Desktop/new science fair thing")
 
 X_PATH = Path("/Users/samyaksrivastava/Desktop/new science fair thing/UI_stuff/artifacts/methylation_gene_agg/M_gene_median_min3.parquet")
@@ -30,25 +25,20 @@ MAP_PATH = Path("/Users/samyaksrivastava/Desktop/new science fair thing/methylat
 OUT_OOF = PROJECT / "oof_methylation.csv"
 OUT_FEATS = PROJECT / "methylation_feature_importance.csv"
 
-# --- NEW: per-fold selected feature importances (stability-ready) ---
-OUT_FI_ALL_FOLDS = PROJECT / "fi_M_all_folds.csv"   # feature_id, fold, importance
+OUT_FI_ALL_FOLDS = PROJECT / "fi_M_all_folds.csv"   #has feature_id, fold, importance
 
 SEED = 42
 N_SPLITS = 5
 
 VAR_THRESHOLD = 1e-5
-K_BEST = 5000  # methylation is high-d; keep larger than RNA
+K_BEST = 5000
 N_ESTIMATORS = 400
 
-# --- define task here ---
 POS_LABEL = "EC"
 NEG_LABEL = "ART"
 ALLOWED_LABELS = {POS_LABEL, NEG_LABEL}
 
-
-# ----------------------------
-# IO
-# ----------------------------
+# ---helpers---
 def load_sample_to_gsm_map(path: Path) -> dict[str, str]:
     m = pd.read_csv(path)
     if not {"old_sample", "new_sample"}.issubset(m.columns):
@@ -66,17 +56,6 @@ def load_X(path: Path, rename_map: dict[str, str] | None) -> pd.DataFrame:
     return X
 
 def load_y(path: Path) -> pd.Series:
-    """
-    Supports multiple label-file formats.
-
-    Preferred (explicit) formats:
-      A) sample_id,label   where label in {EC, ART, ...}
-      B) sample_id,group   where group in {EC, ART, ...}
-
-    Legacy (binary-only) format:
-      C) sample_id,y  (0/1)  <-- cannot infer which phenotype is 1 without an extra column.
-         If ONLY this exists, we keep it as-is, but you must ensure it is already EC vs ART.
-    """
     df = pd.read_csv(path)
     df.columns = [c.strip() for c in df.columns]
 
@@ -85,7 +64,7 @@ def load_y(path: Path) -> pd.Series:
 
     df["sample_id"] = df["sample_id"].astype(str).str.strip()
 
-    # Case A/B: string labels present
+    # Case A: string labels present
     label_col = None
     for c in ["label", "group", "phenotype", "status"]:
         if c in df.columns:
@@ -109,7 +88,7 @@ def load_y(path: Path) -> pd.Series:
         print(f"[methylation] Using task: {POS_LABEL}(1) vs {NEG_LABEL}(0) | counts={y.value_counts().to_dict()}")
         return y
 
-    # Case C: binary y only
+    # Case B: binary y only
     if "y" not in df.columns:
         raise ValueError(
             f"Expected either a label/group column OR a y column in {path}. Found: {df.columns.tolist()}"
@@ -123,7 +102,7 @@ def load_y(path: Path) -> pd.Series:
         raise ValueError(f"y must be binary 0/1. Found extra values: {bad}")
 
     print(
-        "[methylation] WARNING: label column not found; using existing binary y as-is. "
+        "WARNING: label column not found; using existing binary y as-is. "
         "Make sure this file is already EC vs ART (EC=1, ART=0) or it will not match your project task."
     )
     print(f"[methylation] y counts={y.value_counts().to_dict()}")
@@ -135,10 +114,7 @@ def align_Xy(X: pd.DataFrame, y: pd.Series) -> tuple[pd.DataFrame, pd.Series]:
         raise ValueError("No overlapping sample IDs between X and y.")
     return X.loc[common].copy(), y.loc[common].copy()
 
-
-# ----------------------------
-# Fold-safe feature filters
-# ----------------------------
+# ---Fold-safe feature filters---
 def fit_transform_feature_filters(
     X_tr: np.ndarray,
     y_tr: np.ndarray,
@@ -147,12 +123,6 @@ def fit_transform_feature_filters(
     k_best: int,
     feat_names_full: np.ndarray,
 ):
-    """
-    Fit on TRAIN only, apply to TEST, and return selected feature names aligned to X_tr2 columns.
-      1) variance filter
-      2) impute
-      3) SelectKBest
-    """
     vt = VarianceThreshold(threshold=var_thresh)
     X_tr2 = vt.fit_transform(X_tr)
     X_te2 = vt.transform(X_te)
@@ -175,10 +145,7 @@ def fit_transform_feature_filters(
 
     return X_tr2, X_te2, feats1, (vt, None)
 
-
-# ----------------------------
-# XGB OOF
-# ----------------------------
+# ---xgb oof---
 def xgb_cv_oof(X: pd.DataFrame, y: pd.Series):
     if not HAS_XGB:
         raise RuntimeError("xgboost is not installed in this interpreter.")
@@ -194,7 +161,6 @@ def xgb_cv_oof(X: pd.DataFrame, y: pd.Series):
 
     aucs, baccs, cms = [], [], []
 
-    # --- NEW: collect per-fold importances (stability-ready) ---
     fi_rows: list[dict] = []
 
     for fold, (tr, te) in enumerate(cv.split(X_np, y_np), start=1):
@@ -230,8 +196,6 @@ def xgb_cv_oof(X: pd.DataFrame, y: pd.Series):
 
         model.fit(X_tr2, y_tr)
 
-        # --- NEW: per-fold feature importances from booster gain ---
-        # Keys are f0..f(p-1) for the matrix we trained on (post-filters).
         booster = model.get_booster()
         gain = booster.get_score(importance_type="gain")
         for j, feat in enumerate(fold_feats):
@@ -257,12 +221,11 @@ def xgb_cv_oof(X: pd.DataFrame, y: pd.Series):
     cm_sum = np.sum(cms, axis=0)
 
     print("\nCV summary")
-    print(f"AUC mean±std: {mean_auc:.3f} ± {std_auc:.3f}")
-    print(f"BalAcc mean±std: {mean_bacc:.3f} ± {std_bacc:.3f}")
+    print(f"AUC mean±std: {mean_auc:.3f} + or - {std_auc:.3f}")
+    print(f"BalAcc mean±std: {mean_bacc:.3f} + or - {std_bacc:.3f}")
     print("Confusion matrix (rows=true [0,1], cols=pred [0,1]):")
     print(cm_sum)
-
-    # --- NEW: save per-fold importances ---
+    
     fi_df = pd.DataFrame(fi_rows)
     fi_df.to_csv(OUT_FI_ALL_FOLDS, index=False)
     print(f"Saved (per-fold selected feature importances): {OUT_FI_ALL_FOLDS}")
